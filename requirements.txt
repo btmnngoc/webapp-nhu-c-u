@@ -6,4 +6,4 @@ scikit-learn
 xgboost
 plotly
 pmdarima
-prophet
+prophet 
