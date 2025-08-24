@@ -13,14 +13,26 @@ from tensorflow.keras.callbacks import EarlyStopping
 import streamlit as st
 
 def create_dense_model(input_size, number_layers=0):
+    print("create Dense model ")
     model = Sequential()
     model.add(Dense(input_size, activation='relu', input_shape=(input_size,)))
     model.add(Dense(32, activation='sigmoid'))
     model.add(Dropout(0.2))
     model.add(Dense(1))
-    model.compile(loss='mean_absolute_error', optimizer=Adam(0.001), 
+    print('Compiling...')
+    model.compile(loss='mean_absolute_error',
+                  optimizer=Adam(0.001),
                   metrics=['mean_squared_error', 'RootMeanSquaredError'])
     return model
+
+def train_dense(model, X_train, y_train):
+    model.fit(X_train, y_train, batch_size=50, epochs=200, validation_split=0.2, verbose=0,
+              callbacks=[EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)])
+    return model
+
+def testing_dense(model, X_test):
+    y_predicted = model.predict(X_test, verbose=0)
+    return y_predicted.flatten()
 
 def get_best_params(model_choice, X_scaled, y, feature_cols):
     if model_choice in ["XGBoost", "Random Forest"]:
@@ -53,8 +65,8 @@ def get_best_params(model_choice, X_scaled, y, feature_cols):
     return None
 
 def evaluate_model(model_choice, df, X_scaled, y, feature_cols, scaler, best_params, period_col):
-    target_iterations = 10 if model_choice == "Neural Network" else 30
-    kich_thuoc_test = 3 if model_choice == "Neural Network" else 6
+    kich_thuoc_test = 24  # Cố định 24 tuần cho tất cả mô hình
+    target_iterations = 10
     all_metrics = []
     all_test_plots = []
     all_error_plots = []
@@ -63,8 +75,8 @@ def evaluate_model(model_choice, df, X_scaled, y, feature_cols, scaler, best_par
     max_iterations = total_periods - kich_thuoc_test - 1
     iterations = min(target_iterations, max_iterations)
 
-    if total_periods < 12 and model_choice == "Neural Network":
-        st.warning("Dữ liệu quá ngắn để huấn luyện Neural Network đáng tin cậy.")
+    if total_periods < kich_thuoc_test + 12:
+        st.warning(f"Dữ liệu quá ngắn để huấn luyện với tập test {kich_thuoc_test} tuần. Cần ít nhất {kich_thuoc_test + 12} tuần.")
         return None, None, None
 
     for i in range(iterations):
@@ -75,7 +87,7 @@ def evaluate_model(model_choice, df, X_scaled, y, feature_cols, scaler, best_par
         X_train = X_scaled[:start_test_idx]
         y_train = y[:start_test_idx]
         
-        if len(X_train) < 1:
+        if len(X_train) < 12:
             continue
         
         if model_choice in ["XGBoost", "Random Forest", "Neural Network"]:
@@ -85,15 +97,14 @@ def evaluate_model(model_choice, df, X_scaled, y, feature_cols, scaler, best_par
                 model = RandomForestRegressor(random_state=42, **best_params)
             else:
                 model = create_dense_model(X_train.shape[1])
-                callbacks = [EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)]
-                model.fit(X_train, y_train, epochs=200, batch_size=50, validation_split=0.2, verbose=0, callbacks=callbacks)
+                model = train_dense(model, X_train, y_train)
             if model_choice != "Neural Network":
                 model.fit(X_train, y_train)
-            y_pred = model.predict(X_test) if model_choice != "Neural Network" else model.predict(X_test, verbose=0).flatten()
+            y_pred = model.predict(X_test) if model_choice != "Neural Network" else testing_dense(model, X_test)
         
         elif model_choice == "ARIMA":
             train_data = df['y'].iloc[:start_test_idx]
-            model = auto_arima(train_data, seasonal=True, m=12, suppress_warnings=True)
+            model = auto_arima(train_data, seasonal=True, m=52, suppress_warnings=True)  # m=52 cho tuần
             y_pred = model.predict(n_periods=kich_thuoc_test)
             y_pred = np.log1p(np.clip(y_pred, 0, 4000) + 0.1)
         
@@ -101,7 +112,7 @@ def evaluate_model(model_choice, df, X_scaled, y, feature_cols, scaler, best_par
             train_data = df[[period_col, 'y']].iloc[:start_test_idx].rename(columns={period_col: 'ds', 'y': 'y'})
             model = Prophet(yearly_seasonality=True)
             model.fit(train_data)
-            future = model.make_future_dataframe(periods=kich_thuoc_test, freq='MS' if period_col == 'Month' else 'W')
+            future = model.make_future_dataframe(periods=kich_thuoc_test, freq='W-MON')
             forecast = model.predict(future)
             y_pred = np.log1p(np.clip(forecast['yhat'].iloc[-kich_thuoc_test:], 0, 4000) + 0.1)
         
@@ -137,7 +148,7 @@ def evaluate_model(model_choice, df, X_scaled, y, feature_cols, scaler, best_par
         all_error_plots.append(pd.DataFrame({'Iteration': [i], 'errors': [errors]}))
 
     all_metrics_df = pd.DataFrame(all_metrics)
-    top_10_metrics = all_metrics_df[all_metrics_df['MAE_%'].notna()].sort_values('MAE_%').head(7)
+    top_10_metrics = all_metrics_df[all_metrics_df['MAE_%'].notna()].sort_values('MAE_%').head(10)
     top_10_test_plots = pd.concat([plot for plot in all_test_plots if plot['Iteration'].values[0] in top_10_metrics['Iteration'].tolist()])
     top_10_error_plots = pd.concat([err for err in all_error_plots if err['Iteration'].values[0] in top_10_metrics['Iteration'].tolist()])
     
@@ -153,16 +164,15 @@ def forecast_future_demand(model_choice, df, feature_cols, scaler, future_dates,
             model = RandomForestRegressor(random_state=42, **best_params)
         else:
             model = create_dense_model(X_scaled.shape[1])
-            model.fit(X_scaled, y, epochs=200, batch_size=50, validation_split=0.2, verbose=0, 
-                      callbacks=[EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)])
+            model = train_dense(model, X_scaled, y)
         model.fit(X_scaled, y) if model_choice != "Neural Network" else None
         
         future_df = pd.DataFrame(index=range(len(future_dates)))
         last_row = df.iloc[-1]
-        last_y = df['y_log'].iloc[-12 if granularity == 'M' else -52:].values
+        last_y = df['y_log'].iloc[-12:].values  # Dùng lag_12 cho cả tháng và tuần
         
         date_col = 'month_of_year' if granularity == 'M' else 'week_of_year'
-        lags = [1, 2, 3, 4, 12] if granularity == 'M' else [1, 2, 3, 4, 52]
+        lags = [1, 2, 3, 4, 12]
         seasonal_div = 12 if granularity == 'M' else 52
         
         for col in feature_cols:
@@ -174,6 +184,10 @@ def forecast_future_demand(model_choice, df, feature_cols, scaler, future_dates,
                 future_df[col] = last_row['rolling_mean']
             elif col == 'rolling_std':
                 future_df[col] = last_row['rolling_std']
+            elif col == 'Quantity_don_hang':
+                future_df[col] = last_row['Quantity_don_hang']
+            elif col == 'Quantity_sua_chua':
+                future_df[col] = last_row['Quantity_sua_chua']
             elif col == date_col:
                 if granularity == 'M':
                     future_df[col] = [pd.Timestamp(d).month for d in future_dates]
@@ -185,7 +199,10 @@ def forecast_future_demand(model_choice, df, feature_cols, scaler, future_dates,
                 else:
                     future_df[col] = [np.sin(2 * np.pi * pd.Timestamp(d).isocalendar()[1] / seasonal_div) for d in future_dates]
             elif col == 'peak_period':
-                future_df[col] = [1 if pd.Timestamp(d).month in [1, 2, 11, 12] else 0 for d in future_dates]
+                if granularity == 'M':
+                    future_df[col] = [1 if pd.Timestamp(d).month in [1, 2, 11, 12] else 0 for d in future_dates]
+                else:
+                    future_df[col] = [1 if pd.Timestamp(d).isocalendar()[1] in [1, 52] else 0 for d in future_dates]
             else:
                 future_df[col] = last_row[col]
 
@@ -195,11 +212,10 @@ def forecast_future_demand(model_choice, df, feature_cols, scaler, future_dates,
             future_df.loc[i, f'lag_2'] = last_y[-2] if len(last_y) > 1 else 0
             future_df.loc[i, f'lag_3'] = last_y[-3] if len(last_y) > 2 else 0
             future_df.loc[i, f'lag_4'] = last_y[-4] if len(last_y) > 3 else 0
-            lag_last = 12 if granularity == 'M' else 52
-            future_df.loc[i, f'lag_{lag_last}'] = last_y[-lag_last] if len(last_y) > lag_last-1 else 0
+            future_df.loc[i, f'lag_12'] = last_y[-12] if len(last_y) > 11 else 0
             X_future = scaler.transform(future_df.iloc[[i]][feature_cols])
             pred = model.predict(X_future)
-            pred = pred[0] if model_choice != "Neural Network" else pred[0][0]
+            pred = pred[0] if model_choice != "Neural Network" else testing_dense(model, X_future)[0]
             forecast.append(np.clip(np.expm1(pred), 0, 4000))
             last_y = np.append(last_y, pred)
     
@@ -212,7 +228,7 @@ def forecast_future_demand(model_choice, df, feature_cols, scaler, future_dates,
         prophet_df = df[[period_col, 'y']].rename(columns={period_col: 'ds', 'y': 'y'})
         model = Prophet(yearly_seasonality=True)
         model.fit(prophet_df)
-        future = model.make_future_dataframe(periods=len(future_dates), freq='MS' if granularity == 'M' else 'W')
+        future = model.make_future_dataframe(periods=len(future_dates), freq='MS' if granularity == 'M' else 'W-MON')
         forecast_df = model.predict(future)
         forecast = np.clip(forecast_df['yhat'].iloc[-len(future_dates):], 0, 4000)
     
