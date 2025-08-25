@@ -7,3 +7,5 @@ def train_random_forest(X_train, y_train, best_params):
 
 def predict_random_forest(model, X_test):
     return model.predict(X_test)
+
+# cố lên cố lênnn 1 2 1 2 

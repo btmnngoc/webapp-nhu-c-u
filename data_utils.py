@@ -38,14 +38,12 @@ def tong_hop_nhu_cau(don_hang, sua_chua, ma_san_pham, granularity='M'):
         lags = [1, 2, 3, 4, 12]
         seasonal_div = 12
         date_col = 'month_of_year'
-        max_date = pd.Timestamp('2025-09-01')
     else:  # 'W'
         period_col = 'Week'
         freq = 'W-MON'
         lags = [1, 2, 3, 4, 12]
         seasonal_div = 52
         date_col = 'week_of_year'
-        max_date = pd.Timestamp('2025-08-25')
 
     don_hang_sp[period_col] = don_hang_sp['DocDate'].dt.to_period(granularity).apply(lambda r: r.start_time)
     sua_chua_sp[period_col] = sua_chua_sp['Date'].dt.to_period(granularity).apply(lambda r: r.start_time)
@@ -65,6 +63,7 @@ def tong_hop_nhu_cau(don_hang, sua_chua, ma_san_pham, granularity='M'):
     ).fillna(0)
 
     min_date = nhu_cau_agg[period_col].min()
+    max_date = nhu_cau_agg[period_col].max()
     all_periods = pd.date_range(start=min_date, end=max_date, freq=freq).to_frame(index=False, name=period_col)
     nhu_cau_agg = pd.merge(all_periods, nhu_cau_agg, on=period_col, how='left')
     nhu_cau_agg['y'] = pd.to_numeric(nhu_cau_agg['y'], errors='coerce').fillna(0)

@@ -92,15 +92,20 @@ if ma_san_pham:
                     plot_error_histogram(errors, selected_iteration, is_nn=(model_choice == "Neural Network"))
 
             with tab4:
-                st.header(f"Dự báo 6 {granularity_choice.lower()} tiếp theo (từ {datetime(2025, 8, 25).strftime('%Y-%m-%d') if granularity == 'W' else '01/09/2025'})")
-                start_date = '2025-08-25' if granularity == 'W' else '2025-09-01'
+                horizon = 24 if granularity == 'W' else 6
                 freq = 'W-MON' if granularity == 'W' else 'MS'
-                future_dates = pd.date_range(start=start_date, periods=6, freq=freq)
+                last_hist_date = pd.to_datetime(df[period_col].max())
+                next_offset = pd.tseries.frequencies.to_offset(freq)
+                start_date = last_hist_date + next_offset
+                display_start = start_date.strftime('%Y-%m-%d') if granularity == 'W' else start_date.strftime('%d/%m/%Y')
+                st.header(f"Dự báo {horizon} {granularity_choice.lower()} tiếp theo (từ {display_start})")
+                future_dates = pd.date_range(start=start_date, periods=horizon, freq=freq)
                 df_future = forecast_future_demand(model_choice, df_model, feature_cols, scaler, future_dates, best_params, granularity, period_col)
-                st.subheader(f"Bảng dự báo 6 {granularity_choice.lower()}")
+                st.subheader(f"Bảng dự báo {horizon} {granularity_choice.lower()}")
                 st.dataframe(df_future.style.format({'Quantity': '{:.2f}'}), height=300)
                 historical_data = pd.DataFrame({period_col: df[period_col], 'Quantity': np.expm1(df['y_log'])})
                 
+                # Cố lên cố lênnnnn
                 # Hiển thị bảng chuỗi thực tế và dự báo
                 st.subheader(f"Bảng chuỗi thực tế và dự báo ({granularity_choice.lower()})")
                 display_actual_vs_forecast_table(historical_data, df_future, period_col)
@@ -117,4 +122,3 @@ if ma_san_pham:
                     historical_month_agg = aggregate_week_to_month(historical_data, period_col)
                     st.subheader("Đồ thị tổng hợp theo tháng")
                     plot_historical_and_forecast(historical_month_agg, df_month_agg, 'Month')
-

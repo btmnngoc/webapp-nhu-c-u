@@ -58,6 +58,23 @@ def plot_historical_and_forecast(historical_data, forecast_data, period_col):
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=historical_data[period_col], y=historical_data['Quantity'], mode='lines+markers', name='Thực tế', line=dict(color='#00CC96')))
     fig.add_trace(go.Scatter(x=forecast_data[period_col], y=forecast_data['Quantity'], mode='lines+markers', name='Dự báo', line=dict(color='#EF553B')))
+    
+    # Add bridge trace nối điểm cuối thực tế với điểm đầu dự báo
+    if historical_data is not None and forecast_data is not None:
+        if not historical_data.empty and not forecast_data.empty:
+            last_hist_date = historical_data[period_col].iloc[-1]
+            last_hist_value = historical_data['Quantity'].iloc[-1]
+            first_forecast_date = forecast_data[period_col].iloc[0]
+            first_forecast_value = forecast_data['Quantity'].iloc[0]
+
+            fig.add_trace(go.Scatter(
+                x=[last_hist_date, first_forecast_date],
+                y=[last_hist_value, first_forecast_value],
+                mode='lines',
+                line=dict(color='#EF553B'),
+                showlegend=False
+            ))
+    
     fig.update_layout(
         title='Chuỗi Thực Tế và Dự Báo',
         xaxis_title=period_col,

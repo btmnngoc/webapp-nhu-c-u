@@ -41,7 +41,7 @@ def get_best_params(model_choice, X_scaled, y, feature_cols):
     return None
 
 def evaluate_model(model_choice, df, X_scaled, y, feature_cols, scaler, best_params, period_col):
-    kich_thuoc_test = 24  # Cố định 24 tuần
+    kich_thuoc_test = 24  # Cố định 24 tuần, ý là 6 tháng ấyy
     target_iterations = 10
     all_metrics = []
     all_test_plots = []
@@ -80,8 +80,8 @@ def evaluate_model(model_choice, df, X_scaled, y, feature_cols, scaler, best_par
             train_data = df[[period_col, 'y']].iloc[:start_test_idx]
             model = train_prophet(train_data, period_col)
             y_pred = predict_prophet(model, kich_thuoc_test, period_col, df['granularity'].iloc[0] if 'granularity' in df.columns else 'W')
-        else:  # Neural Network
-            model = create_dense_model(X_train.shape[1])  # Sử dụng mô hình Dense mới
+        else:  # Neural Network nàyy
+            model = create_dense_model(X_train.shape[1])  # Sử dụng mô hình Dense của thầy 
             model.fit(X_train, y_train, batch_size=50, epochs=10000, validation_split=0.2, verbose=0)  # Huấn luyện trực tiếp
             y_pred = model.predict(X_test, verbose=0).flatten()
         
@@ -132,7 +132,7 @@ def forecast_future_demand(model_choice, df, feature_cols, scaler, future_dates,
         elif model_choice == "Random Forest":
             model = train_random_forest(X_scaled, y, best_params)
         else:
-            model = create_dense_model(X_scaled.shape[1])  # Sử dụng mô hình Dense mới
+            model = create_dense_model(X_scaled.shape[1])  # Sử dụng mô hình Dense 
             model.fit(X_scaled, y, batch_size=50, epochs=10000, validation_split=0.2, verbose=0)  # Huấn luyện trực tiếp
         
         future_df = pd.DataFrame(index=range(len(future_dates)))
