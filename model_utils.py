@@ -4,35 +4,12 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolu
 from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from xgboost import XGBRegressor
 from sklearn.ensemble import RandomForestRegressor
-from pmdarima import auto_arima
-from prophet import Prophet
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout
-from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import EarlyStopping
+from xgboost_model import train_xgboost, predict_xgboost
+from random_forest_model import train_random_forest, predict_random_forest
+from arima_model import train_arima, predict_arima
+from prophet_model import train_prophet, predict_prophet
+from model_dense import create_dense_model  # Chỉ cần hàm create_dense_model
 import streamlit as st
-
-def create_dense_model(input_size, number_layers=0):
-    print("create Dense model ")
-    model = Sequential()
-    model.add(Dense(input_size, activation='relu', input_shape=(input_size,)))
-    model.add(Dense(32, activation='sigmoid'))
-    model.add(Dropout(0.2))
-    model.add(Dense(1))
-    print('Compiling...')
-    model.compile(loss='mean_absolute_error',
-                  optimizer=Adam(0.001),
-                  metrics=['mean_squared_error', 'RootMeanSquaredError'])
-    return model
-
-def train_dense(model, X_train, y_train):
-    model.fit(X_train, y_train, batch_size=50, epochs=200, validation_split=0.2, verbose=0,
-              callbacks=[EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)])
-    return model
-
-def testing_dense(model, X_test):
-    y_predicted = model.predict(X_test, verbose=0)
-    return y_predicted.flatten()
 
 def get_best_params(model_choice, X_scaled, y, feature_cols):
     if model_choice in ["XGBoost", "Random Forest"]:
@@ -56,8 +33,7 @@ def get_best_params(model_choice, X_scaled, y, feature_cols):
         grid_search.fit(X_scaled, y)
         return grid_search.best_params_
     elif model_choice == "ARIMA":
-        model = auto_arima(y, seasonal=True, m=12, suppress_warnings=True)
-        return {"order": model.order, "seasonal_order": model.seasonal_order}
+        return "Cấu hình tự động với mùa vụ hàng tuần (m=52)."
     elif model_choice == "Prophet":
         return "Cấu hình mặc định với mùa vụ hàng năm."
     elif model_choice == "Neural Network":
@@ -65,7 +41,7 @@ def get_best_params(model_choice, X_scaled, y, feature_cols):
     return None
 
 def evaluate_model(model_choice, df, X_scaled, y, feature_cols, scaler, best_params, period_col):
-    kich_thuoc_test = 24  # Cố định 24 tuần cho tất cả mô hình
+    kich_thuoc_test = 24  # Cố định 24 tuần
     target_iterations = 10
     all_metrics = []
     all_test_plots = []
@@ -90,31 +66,24 @@ def evaluate_model(model_choice, df, X_scaled, y, feature_cols, scaler, best_par
         if len(X_train) < 12:
             continue
         
-        if model_choice in ["XGBoost", "Random Forest", "Neural Network"]:
-            if model_choice == "XGBoost":
-                model = XGBRegressor(objective='reg:squarederror', **best_params)
-            elif model_choice == "Random Forest":
-                model = RandomForestRegressor(random_state=42, **best_params)
-            else:
-                model = create_dense_model(X_train.shape[1])
-                model = train_dense(model, X_train, y_train)
-            if model_choice != "Neural Network":
-                model.fit(X_train, y_train)
-            y_pred = model.predict(X_test) if model_choice != "Neural Network" else testing_dense(model, X_test)
-        
+        if model_choice == "XGBoost":
+            model = train_xgboost(X_train, y_train, best_params)
+            y_pred = predict_xgboost(model, X_test)
+        elif model_choice == "Random Forest":
+            model = train_random_forest(X_train, y_train, best_params)
+            y_pred = predict_random_forest(model, X_test)
         elif model_choice == "ARIMA":
             train_data = df['y'].iloc[:start_test_idx]
-            model = auto_arima(train_data, seasonal=True, m=52, suppress_warnings=True)  # m=52 cho tuần
-            y_pred = model.predict(n_periods=kich_thuoc_test)
-            y_pred = np.log1p(np.clip(y_pred, 0, 4000) + 0.1)
-        
-        else:  # Prophet
-            train_data = df[[period_col, 'y']].iloc[:start_test_idx].rename(columns={period_col: 'ds', 'y': 'y'})
-            model = Prophet(yearly_seasonality=True)
-            model.fit(train_data)
-            future = model.make_future_dataframe(periods=kich_thuoc_test, freq='W-MON')
-            forecast = model.predict(future)
-            y_pred = np.log1p(np.clip(forecast['yhat'].iloc[-kich_thuoc_test:], 0, 4000) + 0.1)
+            model = train_arima(train_data, kich_thuoc_test)
+            y_pred = predict_arima(model, kich_thuoc_test)
+        elif model_choice == "Prophet":
+            train_data = df[[period_col, 'y']].iloc[:start_test_idx]
+            model = train_prophet(train_data, period_col)
+            y_pred = predict_prophet(model, kich_thuoc_test, period_col, df['granularity'].iloc[0] if 'granularity' in df.columns else 'W')
+        else:  # Neural Network
+            model = create_dense_model(X_train.shape[1])  # Sử dụng mô hình Dense mới
+            model.fit(X_train, y_train, batch_size=50, epochs=10000, validation_split=0.2, verbose=0)  # Huấn luyện trực tiếp
+            y_pred = model.predict(X_test, verbose=0).flatten()
         
         y_pred = np.clip(np.expm1(y_pred), 0, 4000)
         y_test = np.expm1(y_test)
@@ -139,7 +108,7 @@ def evaluate_model(model_choice, df, X_scaled, y, feature_cols, scaler, best_par
         
         test_plot_data = pd.DataFrame({
             'Iteration': [i],
-            'Period': [df[period_col].iloc[start_test_idx:end_test_idx]],
+            'Period': [df[period_col].iloc[start_test_idx:end_test_idx].values],
             'Thực tế': [y_test],
             'Dự báo': [y_pred]
         })
@@ -159,17 +128,16 @@ def forecast_future_demand(model_choice, df, feature_cols, scaler, future_dates,
         y = df['y_log'].astype(float)
         X_scaled = scaler.transform(df[feature_cols])
         if model_choice == "XGBoost":
-            model = XGBRegressor(objective='reg:squarederror', **best_params)
+            model = train_xgboost(X_scaled, y, best_params)
         elif model_choice == "Random Forest":
-            model = RandomForestRegressor(random_state=42, **best_params)
+            model = train_random_forest(X_scaled, y, best_params)
         else:
-            model = create_dense_model(X_scaled.shape[1])
-            model = train_dense(model, X_scaled, y)
-        model.fit(X_scaled, y) if model_choice != "Neural Network" else None
+            model = create_dense_model(X_scaled.shape[1])  # Sử dụng mô hình Dense mới
+            model.fit(X_scaled, y, batch_size=50, epochs=10000, validation_split=0.2, verbose=0)  # Huấn luyện trực tiếp
         
         future_df = pd.DataFrame(index=range(len(future_dates)))
         last_row = df.iloc[-1]
-        last_y = df['y_log'].iloc[-12:].values  # Dùng lag_12 cho cả tháng và tuần
+        last_y = df['y_log'].iloc[-12:].values
         
         date_col = 'month_of_year' if granularity == 'M' else 'week_of_year'
         lags = [1, 2, 3, 4, 12]
@@ -214,23 +182,25 @@ def forecast_future_demand(model_choice, df, feature_cols, scaler, future_dates,
             future_df.loc[i, f'lag_4'] = last_y[-4] if len(last_y) > 3 else 0
             future_df.loc[i, f'lag_12'] = last_y[-12] if len(last_y) > 11 else 0
             X_future = scaler.transform(future_df.iloc[[i]][feature_cols])
-            pred = model.predict(X_future)
-            pred = pred[0] if model_choice != "Neural Network" else testing_dense(model, X_future)[0]
+            if model_choice == "XGBoost":
+                pred = predict_xgboost(model, X_future)
+            elif model_choice == "Random Forest":
+                pred = predict_random_forest(model, X_future)
+            else:
+                pred = model.predict(X_future, verbose=0)
+            pred = pred[0]
             forecast.append(np.clip(np.expm1(pred), 0, 4000))
             last_y = np.append(last_y, pred)
     
     elif model_choice == "ARIMA":
-        model = auto_arima(df['y'], seasonal=True, m=12 if granularity == 'M' else 52, suppress_warnings=True)
-        forecast = model.predict(n_periods=len(future_dates))
-        forecast = np.clip(forecast, 0, 4000)
+        model = train_arima(df['y'], len(future_dates))
+        forecast = np.clip(model.predict(n_periods=len(future_dates)), 0, 4000)
     
     elif model_choice == "Prophet":
         prophet_df = df[[period_col, 'y']].rename(columns={period_col: 'ds', 'y': 'y'})
-        model = Prophet(yearly_seasonality=True)
-        model.fit(prophet_df)
-        future = model.make_future_dataframe(periods=len(future_dates), freq='MS' if granularity == 'M' else 'W-MON')
-        forecast_df = model.predict(future)
-        forecast = np.clip(forecast_df['yhat'].iloc[-len(future_dates):], 0, 4000)
+        model = train_prophet(prophet_df, period_col)
+        forecast = predict_prophet(model, len(future_dates), period_col, granularity)
+        forecast = np.clip(np.expm1(forecast), 0, 4000)
     
     df_future = pd.DataFrame({
         period_col: future_dates,

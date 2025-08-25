@@ -3,8 +3,8 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from data_utils import tai_va_xu_ly_du_lieu, tong_hop_nhu_cau
-from models import create_dense_model, get_best_params, evaluate_model, forecast_future_demand
-from visualizations import display_features_table, display_metrics_table, display_stats, plot_forecast_vs_actual, plot_error_histogram, plot_historical_and_forecast
+from model_utils import get_best_params, evaluate_model, forecast_future_demand
+from visualizations import display_features_table, display_metrics_table, display_stats, plot_forecast_vs_actual, plot_error_histogram, plot_historical_and_forecast, display_actual_vs_forecast_table
 
 st.set_page_config(page_title="Dự Báo Nhu Cầu Xuất Kho Phụ Tùng", layout="wide")
 st.title("Dự Báo Nhu Cầu Xuất Kho Phụ Tùng")
@@ -30,13 +30,16 @@ with col3:
 # Đường dẫn file cố định
 file_path = 'data/2025.01. Dữ liệu giả định.xlsx'
 
-# Cảnh báo dữ liệu tuần ngắn
+# Cảnh báo dữ liệu ngắn
 if granularity == 'W':
     don_hang, sua_chua = tai_va_xu_ly_du_lieu(file_path)
     if don_hang is not None and sua_chua is not None:
         df, _ = tong_hop_nhu_cau(don_hang, sua_chua, ma_san_pham, granularity)
         if df is not None and len(df) < 36:
-            st.warning("Dữ liệu tuần quá ngắn (< 36 tuần), kết quả dự báo có thể không ổn định.")
+            st.warning("Dữ liệu tuần quá ngắn (< 36 tuần), kết quả Neural Network có thể không ổn định. Cần ít nhất 36 tuần để huấn luyện tốt.")
+        elif len(df) < 24:
+            st.error("Dữ liệu tuần quá ngắn (< 24 tuần), không đủ để đánh giá mô hình.")
+            st.stop()
 
 if ma_san_pham:
     don_hang, sua_chua = tai_va_xu_ly_du_lieu(file_path)
@@ -77,7 +80,7 @@ if ma_san_pham:
                     st.write(f"Tham số tối ưu cho {model_choice}: {best_params}")
 
             with tab3:
-                st.header("Đánh giá mô hình (Sliding Window - 10 lần test tốt nhất)")
+                st.header("Đánh giá mô hình (Sliding Window - 10 lần)")
                 top_10_metrics, top_10_test_plots, top_10_error_plots = evaluate_model(model_choice, df_model, X_scaled, y, feature_cols, scaler, best_params, period_col)
                 if top_10_metrics is not None:
                     display_metrics_table(top_10_metrics)
@@ -98,7 +101,9 @@ if ma_san_pham:
                 st.dataframe(df_future.style.format({'Quantity': '{:.2f}'}), height=300)
                 historical_data = pd.DataFrame({period_col: df[period_col], 'Quantity': np.expm1(df['y_log'])})
                 
-
+                # Hiển thị bảng chuỗi thực tế và dự báo
+                st.subheader(f"Bảng chuỗi thực tế và dự báo ({granularity_choice.lower()})")
+                display_actual_vs_forecast_table(historical_data, df_future, period_col)
                 
                 # Đồ thị chuỗi thực tế và dự báo
                 st.subheader(f"Đồ thị chuỗi thực tế và dự báo ({granularity_choice.lower()})")
