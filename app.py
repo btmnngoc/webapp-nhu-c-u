@@ -106,9 +106,7 @@ if ma_san_pham:
                 historical_data = pd.DataFrame({period_col: df[period_col], 'Quantity': np.expm1(df['y_log'])})
                 
                 # Cố lên cố lênnnnn
-                # Hiển thị bảng chuỗi thực tế và dự báo
-                st.subheader(f"Bảng chuỗi thực tế và dự báo ({granularity_choice.lower()})")
-                display_actual_vs_forecast_table(historical_data, df_future, period_col)
+
                 
                 # Đồ thị chuỗi thực tế và dự báo
                 st.subheader(f"Đồ thị chuỗi thực tế và dự báo ({granularity_choice.lower()})")
