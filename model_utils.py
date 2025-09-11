@@ -73,11 +73,11 @@ def evaluate_model(model_choice, df, X_scaled, y, feature_cols, scaler, best_par
             model = train_random_forest(X_train, y_train, best_params)
             y_pred = predict_random_forest(model, X_test)
         elif model_choice == "ARIMA":
-            train_data = df['y'].iloc[:start_test_idx]
+            train_data = df['y_log'].iloc[:start_test_idx]
             model = train_arima(train_data, kich_thuoc_test)
             y_pred = predict_arima(model, kich_thuoc_test)
         elif model_choice == "Prophet":
-            train_data = df[[period_col, 'y']].iloc[:start_test_idx]
+            train_data = df[[period_col, 'y_log']].iloc[:start_test_idx]
             model = train_prophet(train_data, period_col)
             y_pred = predict_prophet(model, kich_thuoc_test, period_col, df['granularity'].iloc[0] if 'granularity' in df.columns else 'W')
         else:  # Neural Network nàyy
@@ -85,7 +85,9 @@ def evaluate_model(model_choice, df, X_scaled, y, feature_cols, scaler, best_par
             model.fit(X_train, y_train, batch_size=50, epochs=10000, validation_split=0.2, verbose=0)  # Huấn luyện trực tiếp
             y_pred = model.predict(X_test, verbose=0).flatten()
         
-        y_pred = np.clip(np.expm1(y_pred), 0, 4000)
+        y_pred = np.clip(y_pred, 0, 4000)
+        
+        y_pred = np.expm1(y_pred)
         y_test = np.expm1(y_test)
         
         mae = mean_absolute_error(y_test, y_pred)
@@ -189,18 +191,19 @@ def forecast_future_demand(model_choice, df, feature_cols, scaler, future_dates,
             else:
                 pred = model.predict(X_future, verbose=0)
             pred = pred[0]
-            forecast.append(np.clip(np.expm1(pred), 0, 4000))
+            pred = np.expm1(pred)
+            forecast.append(np.clip(pred, 0, 4000))
             last_y = np.append(last_y, pred)
     
     elif model_choice == "ARIMA":
-        model = train_arima(df['y'], len(future_dates))
+        model = train_arima(df['y_log'], len(future_dates))
         forecast = np.clip(model.predict(n_periods=len(future_dates)), 0, 4000)
     
     elif model_choice == "Prophet":
-        prophet_df = df[[period_col, 'y']].rename(columns={period_col: 'ds', 'y': 'y'})
+        prophet_df = df[[period_col, 'y_log']].rename(columns={period_col: 'ds', 'y_log': 'y'})
         model = train_prophet(prophet_df, period_col)
         forecast = predict_prophet(model, len(future_dates), period_col, granularity)
-        forecast = np.clip(np.expm1(forecast), 0, 4000)
+        forecast = np.clip(forecast, 0, 4000)
     
     df_future = pd.DataFrame({
         period_col: future_dates,
@@ -208,3 +211,71 @@ def forecast_future_demand(model_choice, df, feature_cols, scaler, future_dates,
     })
     df_future[period_col] = df_future[period_col].dt.strftime('%Y-%m-%d')
     return df_future
+
+def evaluate_out_of_sample(model_choice, df, X_scaled, y, feature_cols, scaler, best_params, period_col):
+    kich_thuoc_test = 24
+    total_periods = len(df)
+    if total_periods < kich_thuoc_test + 12:
+        st.warning(f"Dữ liệu quá ngắn để đánh giá ngoài mẫu với tập test {kich_thuoc_test} tuần. Cần ít nhất {kich_thuoc_test + 12} tuần.")
+        return None, None
+
+    train_end_idx = total_periods - kich_thuoc_test
+    forecasts = []
+    y_true_list = []
+
+    for i in range(kich_thuoc_test):
+        train_end = train_end_idx + i
+        X_train = X_scaled[:train_end]
+        y_train = y[:train_end]
+        X_next = X_scaled[train_end:train_end+1]
+        y_next_true = df['y_log'].iloc[train_end:train_end+1]
+
+        if model_choice == "XGBoost":
+            model = train_xgboost(X_train, y_train, best_params)
+            y_next_pred = predict_xgboost(model, X_next)
+        elif model_choice == "Random Forest":
+            model = train_random_forest(X_train, y_train, best_params)
+            y_next_pred = predict_random_forest(model, X_next)
+        elif model_choice == "ARIMA":
+            train_data = df['y_log'].iloc[:train_end]
+            model = train_arima(train_data, 1)
+            y_next_pred = predict_arima(model, 1)
+        elif model_choice == "Prophet":
+            train_data = df[[period_col, 'y_log']].iloc[:train_end]
+            model = train_prophet(train_data, period_col)
+            y_next_pred = predict_prophet(model, 1, period_col, df['granularity'].iloc[0] if 'granularity' in df.columns else 'W')
+        else:  # Neural Network
+            model = create_dense_model(X_train.shape[1])
+            model.fit(X_train, y_train, batch_size=50, epochs=10000, validation_split=0.2, verbose=0)
+            y_next_pred = model.predict(X_next, verbose=0).flatten()
+
+        forecasts.append(np.clip(y_next_pred, 0, 4000))
+        y_true_list.append(y_next_true.values)
+
+    y_pred = np.array(forecasts).flatten()
+    y_true = np.array(y_true_list).flatten()
+
+    y_pred = np.expm1(y_pred)
+    y_true = np.expm1(y_true)
+
+    mae = mean_absolute_error(y_true, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    mape = mean_absolute_percentage_error(y_true, y_pred) * 100
+    mae_percent = (mae / np.mean(y_true) * 100) if np.mean(y_true) > 0 else np.nan
+    rmse_percent = (rmse / np.mean(y_true) * 100) if np.mean(y_true) > 0 else np.nan
+
+    metrics = {
+        'MAE': mae,
+        'RMSE': rmse,
+        'MAPE_%': mape,
+        'MAE_%': mae_percent,
+        'RMSE_%': rmse_percent
+    }
+
+    comparison_df = pd.DataFrame({
+        period_col: df[period_col].iloc[train_end_idx:],
+        'Thực tế': y_true,
+        'Dự báo': y_pred
+    })
+
+    return metrics, comparison_df

@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from data_utils import tai_va_xu_ly_du_lieu, tong_hop_nhu_cau
-from model_utils import get_best_params, evaluate_model, forecast_future_demand
+from model_utils import get_best_params, evaluate_model, forecast_future_demand, evaluate_out_of_sample
 from visualizations import display_features_table, display_metrics_table, display_stats, plot_forecast_vs_actual, plot_error_histogram, plot_historical_and_forecast, display_actual_vs_forecast_table
 
 st.set_page_config(page_title="Dự Báo Nhu Cầu Xuất Kho Phụ Tùng", layout="wide")
@@ -29,43 +29,38 @@ with col3:
 
 # Đường dẫn file cố định
 file_path = 'data/2025.01. Dữ liệu giả định.xlsx'
+don_hang = tai_va_xu_ly_du_lieu(file_path)
 
 # Cảnh báo dữ liệu ngắn
 if granularity == 'W':
-    don_hang, sua_chua = tai_va_xu_ly_du_lieu(file_path)
-    if don_hang is not None and sua_chua is not None:
-        df, _ = tong_hop_nhu_cau(don_hang, sua_chua, ma_san_pham, granularity)
+    if don_hang is not None:
+        df, _ = tong_hop_nhu_cau(don_hang, ma_san_pham, granularity)
         if df is not None and len(df) < 36:
             st.warning("Dữ liệu tuần quá ngắn (< 36 tuần), kết quả Neural Network có thể không ổn định. Cần ít nhất 36 tuần để huấn luyện tốt.")
         elif len(df) < 24:
             st.error("Dữ liệu tuần quá ngắn (< 24 tuần), không đủ để đánh giá mô hình.")
             st.stop()
 
-if ma_san_pham:
-    don_hang, sua_chua = tai_va_xu_ly_du_lieu(file_path)
-    if don_hang is None or sua_chua is None:
-        st.error("Lỗi load dữ liệu. Vui lòng kiểm tra file Excel trong thư mục data.")
+if don_hang is None:
+    st.error("Lỗi load dữ liệu. Vui lòng kiểm tra file Excel trong thư mục data.")
+else:
+    df, period_col = tong_hop_nhu_cau(don_hang, ma_san_pham, granularity)
+    if df is None:
+        st.error("Không có dữ liệu cho mã sản phẩm này.")
     else:
-        df, period_col = tong_hop_nhu_cau(don_hang, sua_chua, ma_san_pham, granularity)
-        if df is None:
-            st.error("Không có dữ liệu cho mã sản phẩm này.")
-        else:
-            # Tabs
-            tab1, tab2, tab3, tab4 = st.tabs(["Đặc trưng", "Tham số tối ưu", "Đánh giá mô hình", "Dự báo 6 kỳ"])
+        # Tabs
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Đặc trưng", "Tham số tối ưu", "Đánh giá mô hình", "Dự báo 6 kỳ", "Dự báo ngoài mẫu"])
 
-            with tab1:
-                st.header("Bảng đặc trưng")
-                display_features_table(df, period_col)
+        with tab1:
+            st.header("Bảng đặc trưng")
+            display_features_table(df, period_col)
 
             # Chuẩn bị features và scaling
             df_model = df.copy()
-            df_model = pd.get_dummies(df_model, columns=['OrderFormName', 'Nhóm ĐL'], prefix=['OrderFormName', 'Nhóm ĐL'])
             date_col = 'month_of_year' if granularity == 'M' else 'week_of_year'
             lags = [1, 2, 3, 4, 12]
             feature_cols = [f'lag_{lag}' for lag in lags] + \
-                           ['Quantity_don_hang', 'Quantity_sua_chua', 'non_zero', 'rolling_mean', 'rolling_std', 
-                            date_col, 'seasonal_index', 'peak_period'] + \
-                           [col for col in df_model.columns if col.startswith('OrderFormName_') or col.startswith('Nhóm ĐL_')]
+                           ['non_zero', 'rolling_mean', 'rolling_std', date_col, 'seasonal_index', 'peak_period']
             feature_cols = [col for col in feature_cols if col in df_model.columns and df_model[col].var() > 0.01]
             X = df_model[feature_cols].astype(float)
             y = df_model['y_log'].astype(float)
@@ -120,3 +115,12 @@ if ma_san_pham:
                     historical_month_agg = aggregate_week_to_month(historical_data, period_col)
                     st.subheader("Đồ thị tổng hợp theo tháng")
                     plot_historical_and_forecast(historical_month_agg, df_month_agg, 'Month')
+
+            with tab5:
+                st.header("Dự báo ngoài mẫu")
+                result = evaluate_out_of_sample(model_choice, df_model, X_scaled, y, feature_cols, scaler, best_params, period_col)
+                if result is not None:
+                    metrics, comparison = result
+                    st.write(metrics)
+                    st.dataframe(comparison)
+                    plot_forecast_vs_actual(comparison, "Out-of-Sample", period_col)
