@@ -65,7 +65,7 @@ def tong_hop_nhu_cau(don_hang, ma_san_pham, granularity='M'):
     # Seasonality features
     if granularity == 'M':
         nhu_cau_agg['month_of_year'] = nhu_cau_agg[period_col].dt.month
-        nhu_cau_agg['seasonal_index'] = np.sin(2 * np.pi * nhu_cau_agg['month_of_year'] / seasonal_div)
+        #nhu_cau_agg['seasonal_index'] = np.sin(2 * np.pi * nhu_cau_agg['month_of_year'] / seasonal_div)
         nhu_cau_agg['peak_period'] = nhu_cau_agg[period_col].dt.month.isin([1, 2, 11, 12]).astype(int)
     else:
         nhu_cau_agg['week_of_year'] = nhu_cau_agg[period_col].dt.isocalendar().week

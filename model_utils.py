@@ -163,11 +163,11 @@ def forecast_future_demand(model_choice, df, feature_cols, scaler, future_dates,
                     future_df[col] = [pd.Timestamp(d).month for d in future_dates]
                 else:
                     future_df[col] = [pd.Timestamp(d).isocalendar()[1] for d in future_dates]
-            elif col == 'seasonal_index':
-                if granularity == 'M':
-                    future_df[col] = [np.sin(2 * np.pi * pd.Timestamp(d).month / seasonal_div) for d in future_dates]
-                else:
-                    future_df[col] = [np.sin(2 * np.pi * pd.Timestamp(d).isocalendar()[1] / seasonal_div) for d in future_dates]
+            #elif col == 'seasonal_index':
+                #if granularity == 'M':
+                 #   future_df[col] = [np.sin(2 * np.pi * pd.Timestamp(d).month / seasonal_div) for d in future_dates]
+                #else:
+                    #future_df[col] = [np.sin(2 * np.pi * pd.Timestamp(d).isocalendar()[1] / seasonal_div) for d in future_dates]
             elif col == 'peak_period':
                 if granularity == 'M':
                     future_df[col] = [1 if pd.Timestamp(d).month in [1, 2, 11, 12] else 0 for d in future_dates]
