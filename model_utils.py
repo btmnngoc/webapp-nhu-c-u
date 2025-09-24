@@ -223,6 +223,7 @@ def evaluate_out_of_sample(model_choice, df, X_scaled, y, feature_cols, scaler, 
     forecasts = []
     y_true_list = []
 
+# Dự báo từng bước một, out of sample
     for i in range(kich_thuoc_test):
         train_end = train_end_idx + i
         X_train = X_scaled[:train_end]
